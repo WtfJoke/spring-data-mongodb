@@ -18,11 +18,13 @@ package org.springframework.data.mongodb.repository.query;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.ReactiveMongoOperations;
 import org.springframework.data.mongodb.core.query.BasicQuery;
+import org.springframework.data.mongodb.core.query.Collation;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.repository.query.ExpressionEvaluatingParameterBinder.BindingContext;
 import org.springframework.data.mongodb.repository.query.StringBasedMongoQuery.ParameterBinding;
@@ -52,6 +54,7 @@ public class ReactiveStringBasedMongoQuery extends AbstractReactiveMongoQuery {
 	private final List<ParameterBinding> queryParameterBindings;
 	private final List<ParameterBinding> fieldSpecParameterBindings;
 	private final ExpressionEvaluatingParameterBinder parameterBinder;
+	private final String collation;
 
 	/**
 	 * Creates a new {@link ReactiveStringBasedMongoQuery} for the given {@link MongoQueryMethod} and
@@ -64,21 +67,21 @@ public class ReactiveStringBasedMongoQuery extends AbstractReactiveMongoQuery {
 	 */
 	public ReactiveStringBasedMongoQuery(ReactiveMongoQueryMethod method, ReactiveMongoOperations mongoOperations,
 			SpelExpressionParser expressionParser, QueryMethodEvaluationContextProvider evaluationContextProvider) {
-		this(method.getAnnotatedQuery(), method, mongoOperations, expressionParser, evaluationContextProvider);
+		this(method.getAnnotatedQuery(), method, mongoOperations, expressionParser, evaluationContextProvider, method.getAnnotatedCollationQuery());
 	}
 
 	/**
 	 * Creates a new {@link ReactiveStringBasedMongoQuery} for the given {@link String}, {@link MongoQueryMethod},
 	 * {@link MongoOperations}, {@link SpelExpressionParser} and {@link QueryMethodEvaluationContextProvider}.
-	 *
-	 * @param query must not be {@literal null}.
+	 *  @param query must not be {@literal null}.
 	 * @param method must not be {@literal null}.
 	 * @param mongoOperations must not be {@literal null}.
 	 * @param expressionParser must not be {@literal null}.
+	 * @param collation
 	 */
 	public ReactiveStringBasedMongoQuery(String query, ReactiveMongoQueryMethod method,
-			ReactiveMongoOperations mongoOperations, SpelExpressionParser expressionParser,
-			QueryMethodEvaluationContextProvider evaluationContextProvider) {
+										 ReactiveMongoOperations mongoOperations, SpelExpressionParser expressionParser,
+										 QueryMethodEvaluationContextProvider evaluationContextProvider, String collation) {
 
 		super(method, mongoOperations);
 
@@ -88,6 +91,7 @@ public class ReactiveStringBasedMongoQuery extends AbstractReactiveMongoQuery {
 		this.queryParameterBindings = new ArrayList<ParameterBinding>();
 		this.query = BINDING_PARSER.parseAndCollectParameterBindingsFromQueryIntoBindings(query,
 				this.queryParameterBindings);
+		this.collation = collation;
 
 		this.fieldSpecParameterBindings = new ArrayList<ParameterBinding>();
 		this.fieldSpec = BINDING_PARSER.parseAndCollectParameterBindingsFromQueryIntoBindings(
@@ -121,13 +125,17 @@ public class ReactiveStringBasedMongoQuery extends AbstractReactiveMongoQuery {
 	 */
 	@Override
 	protected Query createQuery(ConvertingParameterAccessor accessor) {
-
 		String queryString = parameterBinder.bind(this.query, accessor,
 				new BindingContext(getQueryMethod().getParameters(), queryParameterBindings));
 		String fieldsString = parameterBinder.bind(this.fieldSpec, accessor,
 				new BindingContext(getQueryMethod().getParameters(), fieldSpecParameterBindings));
 
 		Query query = new BasicQuery(queryString, fieldsString).with(accessor.getSort());
+		if (collation != null){
+			Document document = Document.parse(this.collation);
+			query = query.collation(Collation.from(document));
+        }
+
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug(String.format("Created query %s for %s fields.", query.getQueryObject(), query.getFieldsObject()));

@@ -21,6 +21,8 @@ import static org.springframework.data.mongodb.test.util.Assertions.assertThat;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.mongodb.core.index.Index;
+import org.springframework.data.mongodb.core.query.Collation;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -72,352 +74,364 @@ import org.springframework.util.ClassUtils;
 @ContextConfiguration("classpath:reactive-infrastructure.xml")
 public class ReactiveMongoRepositoryTests implements BeanClassLoaderAware, BeanFactoryAware {
 
-	@Autowired ReactiveMongoTemplate template;
-
-	ReactiveMongoRepositoryFactory factory;
-	ClassLoader classLoader;
-	BeanFactory beanFactory;
-	ReactivePersonRepository repository;
-	ReactiveCappedCollectionRepository cappedRepository;
-
-	Person dave, oliver, carter, boyd, stefan, leroi, alicia;
-
-	@Override
-	public void setBeanClassLoader(ClassLoader classLoader) {
-		this.classLoader = classLoader == null ? ClassUtils.getDefaultClassLoader() : classLoader;
-	}
-
-	@Override
-	public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
-		this.beanFactory = beanFactory;
-	}
-
-	@Before
-	public void setUp() throws Exception {
-
-		factory = new ReactiveMongoRepositoryFactory(template);
-		factory.setRepositoryBaseClass(SimpleReactiveMongoRepository.class);
-		factory.setBeanClassLoader(classLoader);
-		factory.setBeanFactory(beanFactory);
-		factory.setEvaluationContextProvider(QueryMethodEvaluationContextProvider.DEFAULT);
-
-		repository = factory.getRepository(ReactivePersonRepository.class);
-		cappedRepository = factory.getRepository(ReactiveCappedCollectionRepository.class);
-
-		StepVerifier.create(repository.deleteAll()).verifyComplete();
-
-		dave = new Person("Dave", "Matthews", 42);
-		oliver = new Person("Oliver August", "Matthews", 4);
-		carter = new Person("Carter", "Beauford", 49);
-		carter.setSkills(Arrays.asList("Drums", "percussion", "vocals"));
-		Thread.sleep(10);
-		boyd = new Person("Boyd", "Tinsley", 45);
-		boyd.setSkills(Arrays.asList("Violin", "Electric Violin", "Viola", "Mandolin", "Vocals", "Guitar"));
-		stefan = new Person("Stefan", "Lessard", 34);
-		leroi = new Person("Leroi", "Moore", 41);
+    @Autowired ReactiveMongoTemplate template;
+
+    ReactiveMongoRepositoryFactory factory;
+    ClassLoader classLoader;
+    BeanFactory beanFactory;
+    ReactivePersonRepository repository;
+    ReactiveCappedCollectionRepository cappedRepository;
+
+    Person dave, oliver, carter, boyd, stefan, leroi, alicia;
+
+    @Override
+    public void setBeanClassLoader(ClassLoader classLoader) {
+        this.classLoader = classLoader == null ? ClassUtils.getDefaultClassLoader() : classLoader;
+    }
+
+    @Override
+    public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
+        this.beanFactory = beanFactory;
+    }
+
+    @Before
+    public void setUp() throws Exception {
+
+        factory = new ReactiveMongoRepositoryFactory(template);
+        factory.setRepositoryBaseClass(SimpleReactiveMongoRepository.class);
+        factory.setBeanClassLoader(classLoader);
+        factory.setBeanFactory(beanFactory);
+        factory.setEvaluationContextProvider(QueryMethodEvaluationContextProvider.DEFAULT);
+        template.indexOps(Person.class).ensureIndex(new Index().on("lastname", ASC).collation(Collation.of("en").strength(Collation.ComparisonLevel.secondary()))).block();
+
+        repository = factory.getRepository(ReactivePersonRepository.class);
+        cappedRepository = factory.getRepository(ReactiveCappedCollectionRepository.class);
+
+        StepVerifier.create(repository.deleteAll()).verifyComplete();
+
+        dave = new Person("Dave", "Matthews", 42);
+        oliver = new Person("Oliver August", "Matthews", 4);
+        carter = new Person("Carter", "Beauford", 49);
+        carter.setSkills(Arrays.asList("Drums", "percussion", "vocals"));
+        Thread.sleep(10);
+        boyd = new Person("Boyd", "Tinsley", 45);
+        boyd.setSkills(Arrays.asList("Violin", "Electric Violin", "Viola", "Mandolin", "Vocals", "Guitar"));
+        stefan = new Person("Stefan", "Lessard", 34);
+        leroi = new Person("Leroi", "Moore", 41);
+
+        alicia = new Person("Alicia", "Keys", 30, Sex.FEMALE);
+
+        StepVerifier.create(repository.saveAll(Arrays.asList(oliver, dave, carter, boyd, stefan, leroi, alicia))) //
+                    .expectNextCount(7) //
+                    .verifyComplete();
+    }
 
-		alicia = new Person("Alicia", "Keys", 30, Sex.FEMALE);
+    @Test // DATAMONGO-1444
+    public void shouldFindByLastName() {
+        StepVerifier.create(repository.findByLastname(dave.getLastname())).expectNextCount(2).verifyComplete();
+    }
 
-		StepVerifier.create(repository.saveAll(Arrays.asList(oliver, dave, carter, boyd, stefan, leroi, alicia))) //
-				.expectNextCount(7) //
-				.verifyComplete();
-	}
+    @Test // DATAMONGO-1444
+    public void shouldFindOneByLastName() {
+        StepVerifier.create(repository.findOneByLastname(carter.getLastname())).expectNext(carter).verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldFindByLastName() {
-		StepVerifier.create(repository.findByLastname(dave.getLastname())).expectNextCount(2).verifyComplete();
-	}
+    @Test // DATAMONGO-1444
+    public void shouldFindOneByPublisherOfLastName() {
+        StepVerifier.create(repository.findByLastname(Mono.just(carter.getLastname()))).expectNext(carter).verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldFindOneByLastName() {
-		StepVerifier.create(repository.findOneByLastname(carter.getLastname())).expectNext(carter).verifyComplete();
-	}
+    @Test // DATAMONGO-1444
+    public void shouldFindByPublisherOfLastNameIn() {
+        StepVerifier.create(repository.findByLastnameIn(Flux.just(carter.getLastname(), dave.getLastname()))) //
+                    .expectNextCount(3) //
+                    .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldFindOneByPublisherOfLastName() {
-		StepVerifier.create(repository.findByLastname(Mono.just(carter.getLastname()))).expectNext(carter).verifyComplete();
-	}
+    @Test // DATAMONGO-1444
+    public void shouldFindByPublisherOfLastNameInAndAgeGreater() {
 
-	@Test // DATAMONGO-1444
-	public void shouldFindByPublisherOfLastNameIn() {
-		StepVerifier.create(repository.findByLastnameIn(Flux.just(carter.getLastname(), dave.getLastname()))) //
-				.expectNextCount(3) //
-				.verifyComplete();
-	}
+        StepVerifier
+                .create(repository.findByLastnameInAndAgeGreaterThan(Flux.just(carter.getLastname(), dave.getLastname()), 41)) //
+                .expectNextCount(2) //
+                .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldFindByPublisherOfLastNameInAndAgeGreater() {
+    @Test // DATAMONGO-1444
+    public void shouldFindUsingPublishersInStringQuery() {
 
-		StepVerifier
-				.create(repository.findByLastnameInAndAgeGreaterThan(Flux.just(carter.getLastname(), dave.getLastname()), 41)) //
-				.expectNextCount(2) //
-				.verifyComplete();
-	}
+        StepVerifier.create(repository.findStringQuery(Flux.just("Beauford", "Matthews"), Mono.just(41))) //
+                    .expectNextCount(2) //
+                    .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldFindUsingPublishersInStringQuery() {
+    @Test // DATAMONGO-1444
+    public void shouldFindUsingPublishersInStringCaseInsensitiveQuery() {
+        StepVerifier.create(repository.findStringQueryCaseInsensitive(Flux.just("beauford", "matthews"), Mono.just(41))) //
+                    .expectNextCount(2) //
+                    .verifyComplete();
+    }
 
-		StepVerifier.create(repository.findStringQuery(Flux.just("Beauford", "Matthews"), Mono.just(41))) //
-				.expectNextCount(2) //
-				.verifyComplete();
-	}
 
-	@Test // DATAMONGO-1444
-	public void shouldFindByLastNameAndSort() {
+    @Test // DATAMONGO-1444
+    public void shouldFindByLastNameAndSort() {
 
-		StepVerifier.create(repository.findByLastname("Matthews", Sort.by(ASC, "age"))) //
-				.expectNext(oliver, dave) //
-				.verifyComplete();
+        StepVerifier.create(repository.findByLastname("Matthews", Sort.by(ASC, "age"))) //
+                    .expectNext(oliver, dave) //
+                    .verifyComplete();
 
-		StepVerifier.create(repository.findByLastname("Matthews", Sort.by(DESC, "age"))) //
-				.expectNext(dave, oliver) //
-				.verifyComplete();
-	}
+        StepVerifier.create(repository.findByLastname("Matthews", Sort.by(DESC, "age"))) //
+                    .expectNext(dave, oliver) //
+                    .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldUseTailableCursor() throws Exception {
+    @Test // DATAMONGO-1444
+    public void shouldUseTailableCursor() throws Exception {
 
-		StepVerifier.create(template.dropCollection(Capped.class) //
-				.then(template.createCollection(Capped.class, //
-						CollectionOptions.empty().size(1000).maxDocuments(100).capped()))) //
-				.expectNextCount(1) //
-				.verifyComplete();
+        StepVerifier.create(template.dropCollection(Capped.class) //
+                                    .then(template.createCollection(Capped.class, //
+                                            CollectionOptions.empty().size(1000).maxDocuments(100).capped()))) //
+                    .expectNextCount(1) //
+                    .verifyComplete();
 
-		StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
+        StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
 
-		BlockingQueue<Capped> documents = new LinkedBlockingDeque<>(100);
+        BlockingQueue<Capped> documents = new LinkedBlockingDeque<>(100);
 
-		Disposable disposable = cappedRepository.findByKey("value").doOnNext(documents::add).subscribe();
+        Disposable disposable = cappedRepository.findByKey("value").doOnNext(documents::add).subscribe();
 
-		assertThat(documents.poll(5, TimeUnit.SECONDS)).isNotNull();
+        assertThat(documents.poll(5, TimeUnit.SECONDS)).isNotNull();
 
-		StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
-		assertThat(documents.poll(5, TimeUnit.SECONDS)).isNotNull();
-		assertThat(documents).isEmpty();
+        StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
+        assertThat(documents.poll(5, TimeUnit.SECONDS)).isNotNull();
+        assertThat(documents).isEmpty();
 
-		disposable.dispose();
-	}
+        disposable.dispose();
+    }
 
-	@Test // DATAMONGO-1444
-	public void shouldUseTailableCursorWithProjection() throws Exception {
+    @Test // DATAMONGO-1444
+    public void shouldUseTailableCursorWithProjection() throws Exception {
 
-		StepVerifier.create(template.dropCollection(Capped.class) //
-				.then(template.createCollection(Capped.class, //
-						CollectionOptions.empty().size(1000).maxDocuments(100).capped()))) //
-				.expectNextCount(1) //
-				.verifyComplete();
+        StepVerifier.create(template.dropCollection(Capped.class) //
+                                    .then(template.createCollection(Capped.class, //
+                                            CollectionOptions.empty().size(1000).maxDocuments(100).capped()))) //
+                    .expectNextCount(1) //
+                    .verifyComplete();
 
-		StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
+        StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
 
-		BlockingQueue<CappedProjection> documents = new LinkedBlockingDeque<>(100);
+        BlockingQueue<CappedProjection> documents = new LinkedBlockingDeque<>(100);
 
-		Disposable disposable = cappedRepository.findProjectionByKey("value").doOnNext(documents::add).subscribe();
+        Disposable disposable = cappedRepository.findProjectionByKey("value").doOnNext(documents::add).subscribe();
 
-		CappedProjection projection1 = documents.poll(5, TimeUnit.SECONDS);
-		assertThat(projection1).isNotNull();
-		assertThat(projection1.getRandom()).isNotEqualTo(0);
+        CappedProjection projection1 = documents.poll(5, TimeUnit.SECONDS);
+        assertThat(projection1).isNotNull();
+        assertThat(projection1.getRandom()).isNotEqualTo(0);
 
-		StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
+        StepVerifier.create(template.insert(new Capped("value", Math.random()))).expectNextCount(1).verifyComplete();
 
-		CappedProjection projection2 = documents.poll(5, TimeUnit.SECONDS);
-		assertThat(projection2).isNotNull();
-		assertThat(projection2.getRandom()).isNotEqualTo(0);
+        CappedProjection projection2 = documents.poll(5, TimeUnit.SECONDS);
+        assertThat(projection2).isNotNull();
+        assertThat(projection2.getRandom()).isNotEqualTo(0);
 
-		assertThat(documents).isEmpty();
+        assertThat(documents).isEmpty();
 
-		disposable.dispose();
-	}
+        disposable.dispose();
+    }
 
-	@Test // DATAMONGO-2080
-	public void shouldUseTailableCursorWithDtoProjection() {
+    @Test // DATAMONGO-2080
+    public void shouldUseTailableCursorWithDtoProjection() {
 
-		template.dropCollection(Capped.class) //
-				.then(template.createCollection(Capped.class, //
-						CollectionOptions.empty().size(1000).maxDocuments(100).capped())) //
-				.as(StepVerifier::create).expectNextCount(1) //
-				.verifyComplete();
+        template.dropCollection(Capped.class) //
+                .then(template.createCollection(Capped.class, //
+                        CollectionOptions.empty().size(1000).maxDocuments(100).capped())) //
+                .as(StepVerifier::create).expectNextCount(1) //
+                .verifyComplete();
 
-		template.insert(new Capped("value", Math.random())).as(StepVerifier::create).expectNextCount(1).verifyComplete();
-		cappedRepository.findDtoProjectionByKey("value").as(StepVerifier::create).expectNextCount(1).thenCancel().verify();
-	}
+        template.insert(new Capped("value", Math.random())).as(StepVerifier::create).expectNextCount(1).verifyComplete();
+        cappedRepository.findDtoProjectionByKey("value").as(StepVerifier::create).expectNextCount(1).thenCancel().verify();
+    }
 
-	@Test // DATAMONGO-1444
-	public void findsPeopleByLocationWithinCircle() {
+    @Test // DATAMONGO-1444
+    public void findsPeopleByLocationWithinCircle() {
 
-		Point point = new Point(-73.99171, 40.738868);
-		dave.setLocation(point);
-		StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
+        Point point = new Point(-73.99171, 40.738868);
+        dave.setLocation(point);
+        StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
 
-		StepVerifier.create(repository.findByLocationWithin(new Circle(-78.99171, 45.738868, 170))) //
-				.expectNext(dave) //
-				.verifyComplete();
-	}
+        StepVerifier.create(repository.findByLocationWithin(new Circle(-78.99171, 45.738868, 170))) //
+                    .expectNext(dave) //
+                    .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void findsPeopleByPageableLocationWithinCircle() {
+    @Test // DATAMONGO-1444
+    public void findsPeopleByPageableLocationWithinCircle() {
 
-		Point point = new Point(-73.99171, 40.738868);
-		dave.setLocation(point);
-		StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
+        Point point = new Point(-73.99171, 40.738868);
+        dave.setLocation(point);
+        StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
 
-		StepVerifier.create(repository.findByLocationWithin(new Circle(-78.99171, 45.738868, 170), //
-				PageRequest.of(0, 10))) //
-				.expectNext(dave) //
-				.verifyComplete();
-	}
+        StepVerifier.create(repository.findByLocationWithin(new Circle(-78.99171, 45.738868, 170), //
+                PageRequest.of(0, 10))) //
+                    .expectNext(dave) //
+                    .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void findsPeopleGeoresultByLocationWithinBox() {
+    @Test // DATAMONGO-1444
+    public void findsPeopleGeoresultByLocationWithinBox() {
 
-		Point point = new Point(-73.99171, 40.738868);
-		dave.setLocation(point);
-		StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
+        Point point = new Point(-73.99171, 40.738868);
+        dave.setLocation(point);
+        StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
 
-		StepVerifier.create(repository.findByLocationNear(new Point(-73.99, 40.73), //
-				new Distance(2000, Metrics.KILOMETERS)) //
-		).consumeNextWith(actual -> {
+        StepVerifier.create(repository.findByLocationNear(new Point(-73.99, 40.73), //
+                new Distance(2000, Metrics.KILOMETERS)) //
+        ).consumeNextWith(actual -> {
 
-			assertThat(actual.getDistance().getValue()).isCloseTo(1, offset(1d));
-			assertThat(actual.getContent()).isEqualTo(dave);
-		}).verifyComplete();
-	}
+            assertThat(actual.getDistance().getValue()).isCloseTo(1, offset(1d));
+            assertThat(actual.getContent()).isEqualTo(dave);
+        }).verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void findsPeoplePageableGeoresultByLocationWithinBox() {
+    @Test // DATAMONGO-1444
+    public void findsPeoplePageableGeoresultByLocationWithinBox() {
 
-		Point point = new Point(-73.99171, 40.738868);
-		dave.setLocation(point);
-		StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
+        Point point = new Point(-73.99171, 40.738868);
+        dave.setLocation(point);
+        StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
 
-		StepVerifier.create(repository.findByLocationNear(new Point(-73.99, 40.73), //
-				new Distance(2000, Metrics.KILOMETERS), //
-				PageRequest.of(0, 10))) //
-				.consumeNextWith(actual -> {
+        StepVerifier.create(repository.findByLocationNear(new Point(-73.99, 40.73), //
+                new Distance(2000, Metrics.KILOMETERS), //
+                PageRequest.of(0, 10))) //
+                    .consumeNextWith(actual -> {
 
-					assertThat(actual.getDistance().getValue()).isCloseTo(1, offset(1d));
-					assertThat(actual.getContent()).isEqualTo(dave);
-				}).verifyComplete();
-	}
+                        assertThat(actual.getDistance().getValue()).isCloseTo(1, offset(1d));
+                        assertThat(actual.getContent()).isEqualTo(dave);
+                    }).verifyComplete();
+    }
 
-	@Test // DATAMONGO-1444
-	public void findsPeopleByLocationWithinBox() {
+    @Test // DATAMONGO-1444
+    public void findsPeopleByLocationWithinBox() {
 
-		Point point = new Point(-73.99171, 40.738868);
-		dave.setLocation(point);
-		StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
+        Point point = new Point(-73.99171, 40.738868);
+        dave.setLocation(point);
+        StepVerifier.create(repository.save(dave)).expectNextCount(1).verifyComplete();
 
-		StepVerifier.create(repository.findPersonByLocationNear(new Point(-73.99, 40.73), //
-				new Distance(2000, Metrics.KILOMETERS))) //
-				.expectNext(dave) //
-				.verifyComplete();
-	}
+        StepVerifier.create(repository.findPersonByLocationNear(new Point(-73.99, 40.73), //
+                new Distance(2000, Metrics.KILOMETERS))) //
+                    .expectNext(dave) //
+                    .verifyComplete();
+    }
 
-	@Test // DATAMONGO-1865
-	public void shouldErrorOnFindOneWithNonUniqueResult() {
-		StepVerifier.create(repository.findOneByLastname(dave.getLastname()))
-				.expectError(IncorrectResultSizeDataAccessException.class).verify();
-	}
+    @Test // DATAMONGO-1865
+    public void shouldErrorOnFindOneWithNonUniqueResult() {
+        StepVerifier.create(repository.findOneByLastname(dave.getLastname()))
+                    .expectError(IncorrectResultSizeDataAccessException.class).verify();
+    }
 
-	@Test // DATAMONGO-1865
-	public void shouldReturnFirstFindFirstWithMoreResults() {
-		StepVerifier.create(repository.findFirstByLastname(dave.getLastname())).expectNextCount(1).verifyComplete();
-	}
+    @Test // DATAMONGO-1865
+    public void shouldReturnFirstFindFirstWithMoreResults() {
+        StepVerifier.create(repository.findFirstByLastname(dave.getLastname())).expectNextCount(1).verifyComplete();
+    }
 
-	@Test // DATAMONGO-2030
-	public void shouldReturnExistsBy() {
-		StepVerifier.create(repository.existsByLastname(dave.getLastname())).expectNext(true).verifyComplete();
-	}
+    @Test // DATAMONGO-2030
+    public void shouldReturnExistsBy() {
+        StepVerifier.create(repository.existsByLastname(dave.getLastname())).expectNext(true).verifyComplete();
+    }
 
-	@Test // DATAMONGO-1979
-	public void findAppliesAnnotatedSort() {
+    @Test // DATAMONGO-1979
+    public void findAppliesAnnotatedSort() {
 
-		repository.findByAgeGreaterThan(40).collectList().as(StepVerifier::create).consumeNextWith(result -> {
-			assertThat(result).containsSequence(carter, boyd, dave, leroi);
-		}).verifyComplete();
-	}
+        repository.findByAgeGreaterThan(40).collectList().as(StepVerifier::create).consumeNextWith(result -> {
+            assertThat(result).containsSequence(carter, boyd, dave, leroi);
+        }).verifyComplete();
+    }
 
-	@Test // DATAMONGO-1979
-	public void findWithSortOverwritesAnnotatedSort() {
+    @Test // DATAMONGO-1979
+    public void findWithSortOverwritesAnnotatedSort() {
 
-		repository.findByAgeGreaterThan(40, Sort.by(Direction.ASC, "age")).collectList().as(StepVerifier::create)
-				.consumeNextWith(result -> {
-					assertThat(result).containsSequence(leroi, dave, boyd, carter);
-				}).verifyComplete();
-	}
+        repository.findByAgeGreaterThan(40, Sort.by(Direction.ASC, "age")).collectList().as(StepVerifier::create)
+                  .consumeNextWith(result -> {
+                      assertThat(result).containsSequence(leroi, dave, boyd, carter);
+                  }).verifyComplete();
+    }
 
-	interface ReactivePersonRepository extends ReactiveMongoRepository<Person, String> {
+    interface ReactivePersonRepository extends ReactiveMongoRepository<Person, String> {
 
-		Flux<Person> findByLastname(String lastname);
+        Flux<Person> findByLastname(String lastname);
 
-		Mono<Person> findOneByLastname(String lastname);
+        Mono<Person> findOneByLastname(String lastname);
 
-		Mono<DtoProjection> findOneProjectedByLastname(String lastname);
+        Mono<DtoProjection> findOneProjectedByLastname(String lastname);
 
-		Mono<Person> findByLastname(Publisher<String> lastname);
+        Mono<Person> findByLastname(Publisher<String> lastname);
 
-		Flux<Person> findByLastnameIn(Publisher<String> lastname);
+        Flux<Person> findByLastnameIn(Publisher<String> lastname);
 
-		Flux<Person> findByLastname(String lastname, Sort sort);
+        Flux<Person> findByLastname(String lastname, Sort sort);
 
-		Flux<Person> findByLastnameInAndAgeGreaterThan(Flux<String> lastname, int age);
+        Flux<Person> findByLastnameInAndAgeGreaterThan(Flux<String> lastname, int age);
 
-		@Query("{ lastname: { $in: ?0 }, age: { $gt : ?1 } }")
-		Flux<Person> findStringQuery(Flux<String> lastname, Mono<Integer> age);
+        @Query("{ lastname: { $in: ?0 }, age: { $gt : ?1 } }")
+        Flux<Person> findStringQuery(Flux<String> lastname, Mono<Integer> age);
 
-		Flux<Person> findByLocationWithin(Circle circle);
+        @Query(value = "{ lastname: { $in: ?0 }, age: { $gt : ?1 } }", collation = "{'locale': 'en', 'strength': 2}")
+        Flux<Person> findStringQueryCaseInsensitive(Flux<String> lastname, Mono<Integer> age);
 
-		Flux<Person> findByLocationWithin(Circle circle, Pageable pageable);
+        Flux<Person> findByLocationWithin(Circle circle);
 
-		Flux<GeoResult<Person>> findByLocationNear(Point point, Distance maxDistance);
+        Flux<Person> findByLocationWithin(Circle circle, Pageable pageable);
 
-		Flux<GeoResult<Person>> findByLocationNear(Point point, Distance maxDistance, Pageable pageable);
+        Flux<GeoResult<Person>> findByLocationNear(Point point, Distance maxDistance);
 
-		Flux<Person> findPersonByLocationNear(Point point, Distance maxDistance);
+        Flux<GeoResult<Person>> findByLocationNear(Point point, Distance maxDistance, Pageable pageable);
 
-		Mono<Boolean> existsByLastname(String lastname);
+        Flux<Person> findPersonByLocationNear(Point point, Distance maxDistance);
 
-		Mono<Person> findFirstByLastname(String lastname);
+        Mono<Boolean> existsByLastname(String lastname);
 
-		@Query(sort = "{ age : -1 }")
-		Flux<Person> findByAgeGreaterThan(int age);
+        Mono<Person> findFirstByLastname(String lastname);
 
-		@Query(sort = "{ age : -1 }")
-		Flux<Person> findByAgeGreaterThan(int age, Sort sort);
-	}
+        @Query(sort = "{ age : -1 }")
+        Flux<Person> findByAgeGreaterThan(int age);
 
-	interface ReactiveCappedCollectionRepository extends Repository<Capped, String> {
+        @Query(sort = "{ age : -1 }")
+        Flux<Person> findByAgeGreaterThan(int age, Sort sort);
+    }
 
-		@Tailable
-		Flux<Capped> findByKey(String key);
+    interface ReactiveCappedCollectionRepository extends Repository<Capped, String> {
 
-		@Tailable
-		Flux<CappedProjection> findProjectionByKey(String key);
+        @Tailable
+        Flux<Capped> findByKey(String key);
 
-		@Tailable
-		Flux<DtoProjection> findDtoProjectionByKey(String key);
-	}
+        @Tailable
+        Flux<CappedProjection> findProjectionByKey(String key);
 
-	@Document
-	@NoArgsConstructor
-	static class Capped {
+        @Tailable
+        Flux<DtoProjection> findDtoProjectionByKey(String key);
+    }
 
-		String id;
-		String key;
-		double random;
+    @Document
+    @NoArgsConstructor
+    static class Capped {
 
-		public Capped(String key, double random) {
-			this.key = key;
-			this.random = random;
-		}
-	}
+        String id;
+        String key;
+        double random;
 
-	interface CappedProjection {
-		double getRandom();
-	}
+        public Capped(String key, double random) {
+            this.key = key;
+            this.random = random;
+        }
+    }
 
-	@Data
-	static class DtoProjection {
-		String id;
-		double unknown;
-	}
+    interface CappedProjection {
+        double getRandom();
+    }
+
+    @Data
+    static class DtoProjection {
+        String id;
+        double unknown;
+    }
 }

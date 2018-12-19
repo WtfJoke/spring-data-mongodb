@@ -147,7 +147,7 @@ public class ReactiveMongoRepositoryFactory extends ReactiveRepositoryFactorySup
 			if (namedQueries.hasQuery(namedQueryName)) {
 				String namedQuery = namedQueries.getQuery(namedQueryName);
 				return new ReactiveStringBasedMongoQuery(namedQuery, queryMethod, operations, EXPRESSION_PARSER,
-						evaluationContextProvider);
+						evaluationContextProvider, null);
 			} else if (queryMethod.hasAnnotatedQuery()) {
 				return new ReactiveStringBasedMongoQuery(queryMethod, operations, EXPRESSION_PARSER, evaluationContextProvider);
 			} else {

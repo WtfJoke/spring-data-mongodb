@@ -112,11 +112,22 @@ public class MongoQueryMethod extends QueryMethod {
 		return findAnnotatedQuery().orElse(null);
 	}
 
+	@Nullable
+	String getAnnotatedCollationQuery() {
+		return findAnnotatedCollationQuery().orElse(null);
+	}
+
 	private Optional<String> findAnnotatedQuery() {
 
 		return lookupQueryAnnotation() //
 				.map(Query::value) //
 				.filter(StringUtils::hasText);
+	}
+
+	private Optional<String> findAnnotatedCollationQuery() {
+		return lookupQueryAnnotation() //
+									   .map(Query::collation) //
+									   .filter(StringUtils::hasText);
 	}
 
 	/**
