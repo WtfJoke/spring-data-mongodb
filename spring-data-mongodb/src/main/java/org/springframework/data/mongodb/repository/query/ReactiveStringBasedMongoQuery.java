@@ -42,147 +42,148 @@ import org.springframework.util.Assert;
  */
 public class ReactiveStringBasedMongoQuery extends AbstractReactiveMongoQuery {
 
-	private static final String COUNT_EXISTS_AND_DELETE = "Manually defined query for %s cannot be a count and exists or delete query at the same time!";
-	private static final Logger LOG = LoggerFactory.getLogger(ReactiveStringBasedMongoQuery.class);
-	private static final ParameterBindingParser BINDING_PARSER = ParameterBindingParser.INSTANCE;
+    private static final String COUNT_EXISTS_AND_DELETE = "Manually defined query for %s cannot be a count and exists or delete query at the same time!";
+    private static final Logger LOG = LoggerFactory.getLogger(ReactiveStringBasedMongoQuery.class);
+    private static final ParameterBindingParser BINDING_PARSER = ParameterBindingParser.INSTANCE;
 
-	private final String query;
-	private final String fieldSpec;
-	private final boolean isCountQuery;
-	private final boolean isExistsQuery;
-	private final boolean isDeleteQuery;
-	private final List<ParameterBinding> queryParameterBindings;
-	private final List<ParameterBinding> fieldSpecParameterBindings;
-	private final ExpressionEvaluatingParameterBinder parameterBinder;
-	private final String collation;
+    private final String query;
+    private final String fieldSpec;
+    private final boolean isCountQuery;
+    private final boolean isExistsQuery;
+    private final boolean isDeleteQuery;
+    private final List<ParameterBinding> queryParameterBindings;
+    private final List<ParameterBinding> fieldSpecParameterBindings;
+    private final ExpressionEvaluatingParameterBinder parameterBinder;
+    private Collation collation;
 
-	/**
-	 * Creates a new {@link ReactiveStringBasedMongoQuery} for the given {@link MongoQueryMethod} and
-	 * {@link MongoOperations}.
-	 *
-	 * @param method must not be {@literal null}.
-	 * @param mongoOperations must not be {@literal null}.
-	 * @param expressionParser must not be {@literal null}.
-	 * @param evaluationContextProvider must not be {@literal null}.
-	 */
-	public ReactiveStringBasedMongoQuery(ReactiveMongoQueryMethod method, ReactiveMongoOperations mongoOperations,
-			SpelExpressionParser expressionParser, QueryMethodEvaluationContextProvider evaluationContextProvider) {
-		this(method.getAnnotatedQuery(), method, mongoOperations, expressionParser, evaluationContextProvider, method.getAnnotatedCollationQuery());
-	}
+    /**
+     * Creates a new {@link ReactiveStringBasedMongoQuery} for the given {@link MongoQueryMethod} and {@link
+     * MongoOperations}.
+     *
+     * @param method                    must not be {@literal null}.
+     * @param mongoOperations           must not be {@literal null}.
+     * @param expressionParser          must not be {@literal null}.
+     * @param evaluationContextProvider must not be {@literal null}.
+     */
+    public ReactiveStringBasedMongoQuery(ReactiveMongoQueryMethod method, ReactiveMongoOperations mongoOperations,
+                                         SpelExpressionParser expressionParser, QueryMethodEvaluationContextProvider evaluationContextProvider) {
+        this(method.getAnnotatedQuery(), method, mongoOperations, expressionParser, evaluationContextProvider, method.getAnnotatedCollationQuery());
+    }
 
-	/**
-	 * Creates a new {@link ReactiveStringBasedMongoQuery} for the given {@link String}, {@link MongoQueryMethod},
-	 * {@link MongoOperations}, {@link SpelExpressionParser} and {@link QueryMethodEvaluationContextProvider}.
-	 *  @param query must not be {@literal null}.
-	 * @param method must not be {@literal null}.
-	 * @param mongoOperations must not be {@literal null}.
-	 * @param expressionParser must not be {@literal null}.
-	 * @param collation
-	 */
-	public ReactiveStringBasedMongoQuery(String query, ReactiveMongoQueryMethod method,
-										 ReactiveMongoOperations mongoOperations, SpelExpressionParser expressionParser,
-										 QueryMethodEvaluationContextProvider evaluationContextProvider, String collation) {
+    /**
+     * Creates a new {@link ReactiveStringBasedMongoQuery} for the given {@link String}, {@link MongoQueryMethod},
+     * {@link MongoOperations}, {@link SpelExpressionParser} and {@link QueryMethodEvaluationContextProvider}.
+     * @param query            must not be {@literal null}.
+     * @param method           must not be {@literal null}.
+     * @param mongoOperations  must not be {@literal null}.
+     * @param expressionParser must not be {@literal null}.
+     */
+    public ReactiveStringBasedMongoQuery(String query, ReactiveMongoQueryMethod method,
+                                         ReactiveMongoOperations mongoOperations, SpelExpressionParser expressionParser,
+                                         QueryMethodEvaluationContextProvider evaluationContextProvider, String collation) {
 
-		super(method, mongoOperations);
+        super(method, mongoOperations);
 
-		Assert.notNull(query, "Query must not be null!");
-		Assert.notNull(expressionParser, "SpelExpressionParser must not be null!");
+        Assert.notNull(query, "Query must not be null!");
+        Assert.notNull(expressionParser, "SpelExpressionParser must not be null!");
 
-		this.queryParameterBindings = new ArrayList<ParameterBinding>();
-		this.query = BINDING_PARSER.parseAndCollectParameterBindingsFromQueryIntoBindings(query,
-				this.queryParameterBindings);
-		this.collation = collation;
+        this.queryParameterBindings = new ArrayList<ParameterBinding>();
+        this.query = BINDING_PARSER.parseAndCollectParameterBindingsFromQueryIntoBindings(query,
+                this.queryParameterBindings);
 
-		this.fieldSpecParameterBindings = new ArrayList<ParameterBinding>();
-		this.fieldSpec = BINDING_PARSER.parseAndCollectParameterBindingsFromQueryIntoBindings(
-				method.getFieldSpecification(), this.fieldSpecParameterBindings);
-
-		if (method.hasAnnotatedQuery()) {
-
-			org.springframework.data.mongodb.repository.Query queryAnnotation = method.getQueryAnnotation();
-
-			this.isCountQuery = queryAnnotation.count();
-			this.isExistsQuery = queryAnnotation.exists();
-			this.isDeleteQuery = queryAnnotation.delete();
-
-			if (hasAmbiguousProjectionFlags(this.isCountQuery, this.isExistsQuery, this.isDeleteQuery)) {
-				throw new IllegalArgumentException(String.format(COUNT_EXISTS_AND_DELETE, method));
-			}
-
-		} else {
-
-			this.isCountQuery = false;
-			this.isExistsQuery = false;
-			this.isDeleteQuery = false;
-		}
-
-		this.parameterBinder = new ExpressionEvaluatingParameterBinder(expressionParser, evaluationContextProvider);
-	}
-
-	/*
-	 * (non-Javadoc)
-	 * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#createQuery(org.springframework.data.mongodb.repository.query.ConvertingParameterAccessor)
-	 */
-	@Override
-	protected Query createQuery(ConvertingParameterAccessor accessor) {
-		String queryString = parameterBinder.bind(this.query, accessor,
-				new BindingContext(getQueryMethod().getParameters(), queryParameterBindings));
-		String fieldsString = parameterBinder.bind(this.fieldSpec, accessor,
-				new BindingContext(getQueryMethod().getParameters(), fieldSpecParameterBindings));
-
-		Query query = new BasicQuery(queryString, fieldsString).with(accessor.getSort());
-		if (collation != null){
-			Document document = Document.parse(this.collation);
-			query = query.collation(Collation.from(document));
+        if (collation !=  null){
+            this.collation = Collation.from(Document.parse(collation));
         }
 
 
-		if (LOG.isDebugEnabled()) {
-			LOG.debug(String.format("Created query %s for %s fields.", query.getQueryObject(), query.getFieldsObject()));
-		}
+        this.fieldSpecParameterBindings = new ArrayList<ParameterBinding>();
+        this.fieldSpec = BINDING_PARSER.parseAndCollectParameterBindingsFromQueryIntoBindings(
+                method.getFieldSpecification(), this.fieldSpecParameterBindings);
 
-		return query;
-	}
+        if (method.hasAnnotatedQuery()) {
 
-	/*
-	 * (non-Javadoc)
-	 * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isCountQuery()
-	 */
-	@Override
-	protected boolean isCountQuery() {
-		return isCountQuery;
-	}
+            org.springframework.data.mongodb.repository.Query queryAnnotation = method.getQueryAnnotation();
 
-	/*
-	 * (non-Javadoc)
-	 * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isExistsQuery()
-	 */
-	@Override
-	protected boolean isExistsQuery() {
-		return isExistsQuery;
-	}
+            this.isCountQuery = queryAnnotation.count();
+            this.isExistsQuery = queryAnnotation.exists();
+            this.isDeleteQuery = queryAnnotation.delete();
 
-	/*
-	 * (non-Javadoc)
-	 * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isDeleteQuery()
-	 */
-	@Override
-	protected boolean isDeleteQuery() {
-		return this.isDeleteQuery;
-	}
+            if (hasAmbiguousProjectionFlags(this.isCountQuery, this.isExistsQuery, this.isDeleteQuery)) {
+                throw new IllegalArgumentException(String.format(COUNT_EXISTS_AND_DELETE, method));
+            }
 
-	/*
-	 * (non-Javadoc)
-	 * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isLimiting()
-	 */
-	@Override
-	protected boolean isLimiting() {
-		return false;
-	}
+        } else {
 
-	private static boolean hasAmbiguousProjectionFlags(boolean isCountQuery, boolean isExistsQuery,
-			boolean isDeleteQuery) {
-		return BooleanUtil.countBooleanTrueValues(isCountQuery, isExistsQuery, isDeleteQuery) > 1;
-	}
+            this.isCountQuery = false;
+            this.isExistsQuery = false;
+            this.isDeleteQuery = false;
+        }
+
+        this.parameterBinder = new ExpressionEvaluatingParameterBinder(expressionParser, evaluationContextProvider);
+    }
+
+    /*
+     * (non-Javadoc)
+     * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#createQuery(org.springframework.data.mongodb.repository.query.ConvertingParameterAccessor)
+     */
+    @Override
+    protected Query createQuery(ConvertingParameterAccessor accessor) {
+        String queryString = parameterBinder.bind(this.query, accessor,
+                new BindingContext(getQueryMethod().getParameters(), queryParameterBindings));
+        String fieldsString = parameterBinder.bind(this.fieldSpec, accessor,
+                new BindingContext(getQueryMethod().getParameters(), fieldSpecParameterBindings));
+
+        Query query = new BasicQuery(queryString, fieldsString).with(accessor.getSort());
+        if (collation != null) {
+            query = query.collation(collation);
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(String.format("Created query %s for %s fields.", query.getQueryObject(), query.getFieldsObject()));
+        }
+
+        return query;
+    }
+
+    /*
+     * (non-Javadoc)
+     * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isCountQuery()
+     */
+    @Override
+    protected boolean isCountQuery() {
+        return isCountQuery;
+    }
+
+    /*
+     * (non-Javadoc)
+     * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isExistsQuery()
+     */
+    @Override
+    protected boolean isExistsQuery() {
+        return isExistsQuery;
+    }
+
+    /*
+     * (non-Javadoc)
+     * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isDeleteQuery()
+     */
+    @Override
+    protected boolean isDeleteQuery() {
+        return this.isDeleteQuery;
+    }
+
+    /*
+     * (non-Javadoc)
+     * @see org.springframework.data.mongodb.repository.query.AbstractReactiveMongoQuery#isLimiting()
+     */
+    @Override
+    protected boolean isLimiting() {
+        return false;
+    }
+
+    private static boolean hasAmbiguousProjectionFlags(boolean isCountQuery, boolean isExistsQuery,
+                                                       boolean isDeleteQuery) {
+        return BooleanUtil.countBooleanTrueValues(isCountQuery, isExistsQuery, isDeleteQuery) > 1;
+    }
 
 }
