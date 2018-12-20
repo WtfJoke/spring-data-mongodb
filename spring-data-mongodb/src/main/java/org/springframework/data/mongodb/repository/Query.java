@@ -54,6 +54,8 @@ public @interface Query {
 	 */
 	String fields() default "";
 
+	String collation() default "";
+
 	/**
 	 * Returns whether the query defined should be executed as count projection.
 	 *

@@ -119,6 +119,17 @@ public class MongoQueryMethod extends QueryMethod {
 				.filter(StringUtils::hasText);
 	}
 
+	@Nullable
+	String getAnnotatedCollationQuery() {
+		return findAnnotatedCollationQuery().orElse(null);
+	}
+
+	private Optional<String> findAnnotatedCollationQuery() {
+		return lookupQueryAnnotation() //
+				.map(Query::collation) //
+				.filter(StringUtils::hasText);
+	}
+
 	/**
 	 * Returns the field specification to be used for the query.
 	 *

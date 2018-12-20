@@ -52,7 +52,9 @@ import org.springframework.data.geo.Metrics;
 import org.springframework.data.geo.Point;
 import org.springframework.data.mongodb.core.CollectionOptions;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
+import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.query.Collation;
 import org.springframework.data.mongodb.repository.Person.Sex;
 import org.springframework.data.mongodb.repository.support.ReactiveMongoRepositoryFactory;
 import org.springframework.data.mongodb.repository.support.SimpleReactiveMongoRepository;
@@ -158,6 +160,17 @@ public class ReactiveMongoRepositoryTests implements BeanClassLoaderAware, BeanF
 	public void shouldFindUsingPublishersInStringQuery() {
 
 		StepVerifier.create(repository.findStringQuery(Flux.just("Beauford", "Matthews"), Mono.just(41))) //
+				.expectNextCount(2) //
+				.verifyComplete();
+	}
+
+	@Test // DATAMONGO-1854
+	public void shouldFindUsingPublishersInStringCaseInsensitiveQuery() {
+		Index collationIndex = new Index().on("lastname", ASC)
+				.collation(Collation.of("en").strength(Collation.ComparisonLevel.secondary()));
+		StepVerifier.create(template.indexOps(Person.class).ensureIndex(collationIndex)).expectNextCount(1).verifyComplete();
+
+		StepVerifier.create(repository.findStringQueryCaseInsensitive(Flux.just("beauford", "matthews"), Mono.just(41))) //
 				.expectNextCount(2) //
 				.verifyComplete();
 	}
@@ -363,6 +376,9 @@ public class ReactiveMongoRepositoryTests implements BeanClassLoaderAware, BeanF
 
 		@Query("{ lastname: { $in: ?0 }, age: { $gt : ?1 } }")
 		Flux<Person> findStringQuery(Flux<String> lastname, Mono<Integer> age);
+
+		@Query(value = "{ lastname: { $in: ?0 }, age: { $gt : ?1 } }", collation = "{'locale': 'en', 'strength': 2}")
+		Flux<Person> findStringQueryCaseInsensitive(Flux<String> lastname, Mono<Integer> age);
 
 		Flux<Person> findByLocationWithin(Circle circle);
 
